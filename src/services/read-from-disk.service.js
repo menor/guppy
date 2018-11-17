@@ -66,14 +66,22 @@ export const loadGuppyProjects = (projectPaths: Array<string>) =>
       function(projectPath, callback) {
         loadPackageJson(projectPath)
           .then(json => callback(null, json))
-          .catch(err =>
+          .catch(err => {
             // If the package.json couldn't be loaded, this likely means the
             // project was deleted, and our cache is out-of-date.
             // This isn't truly an error, it just means we need to ignore this
             // project.
             // TODO: Handle other errors!
-            callback(null, null)
-          );
+            // If the error code is ENOENT means that the file hasn't been found
+            // So we assume that the project has been deleted and return the
+            // error as data instead of as an error, so we can deal with it
+            // further down the pipe
+            if (err.code === 'ENOENT') {
+              callback(null, err);
+            } else {
+              callback(err, null);
+            }
+          });
       },
       (err, results) => {
         // It's possible that the project was deleted since Guppy last checked.
@@ -85,28 +93,31 @@ export const loadGuppyProjects = (projectPaths: Array<string>) =>
           return reject(err);
         }
 
-        // a `null` result means the project couldn't be loaded, probably
-        // because it was deleted.
-        // TODO: Maybe a warning prompt should be raised if this is the case,
-        // so that users don't wonder where the project went?
-        const validProjects = results.filter(
-          project => !!project && project.guppy
-        );
-
-        // The results will be an array of package.jsons.
-        // I want a database-style map.
-        const projects = validProjects.reduce(
-          (projectsMap, project) => ({
-            ...projectsMap,
-            [project.guppy.id]: project,
-          }),
-          {}
-        );
-
-        resolve(projects);
+        resolve(results);
       }
     );
   });
+
+export const parseProjects = projects => {
+  const validProjects = projects.filter(project => !!project && project.guppy);
+  const projectPathsRegex = /([\w-]+)(?:\/package.json)$/;
+  const deletedProjects = projects
+    .filter(project => !project.guppy)
+    .map(project => projectPathsRegex.exec(project.path)[1]);
+
+  // The results will be an array of package.jsons.
+  // I want a database-style map.
+  const parsedProjects = validProjects.reduce(
+    (projectsMap, project) => ({
+      ...projectsMap,
+      [project.guppy.id]: project,
+    }),
+    {}
+  );
+
+  console.log('deletedProjects', deletedProjects);
+  return { deletedProjects, parsedProjects };
+};
 
 /**
  * Find a specific project's dependency information.
