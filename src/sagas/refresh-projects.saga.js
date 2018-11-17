@@ -21,24 +21,35 @@ export function* refreshProjects(): Saga<void> {
   try {
     const projectsFromDisk = yield call(loadGuppyProjects, pathsArray);
 
-    const { parsedProjects, deletedProjects } = yield call(
+    const { validProjects, deletedProjects } = yield call(
       parseProjects,
       projectsFromDisk
     );
 
-    yield put(refreshProjectsFinish(parsedProjects));
+    yield put(refreshProjectsFinish(validProjects));
+
+    // We show an alert if we found deleted projects
     if (deletedProjects.length > 0) {
-      const response = yield call([dialog, dialog.showMessageBox], {
-        type: 'warning',
-        cancelId: 2,
-        title: `Orphan Projects`,
-        message: `Not found ${deletedProjects.join(', ')}`,
-      });
+      yield call(
+        [dialog, dialog.showMessageBox],
+        getDeletedProjectsMessage(deletedProjects)
+      );
     }
   } catch (err) {
     yield put(refreshProjectsError(err));
   }
 }
+
+// TODO: Improve the message interface, handle plurals
+// See how we can make this more clear to the user
+// Does this function belong in this file or should it be moved elsewhere?
+const getDeletedProjectsMessage = deletedProjects => ({
+  type: 'warning',
+  title: `Orphan Projects`,
+  message: `Guppy couln't find the project(s) on disk ${deletedProjects.join(
+    ', '
+  )}`,
+});
 
 export default function* rootSaga(): Saga<void> {
   yield takeEvery(REFRESH_PROJECTS_START, refreshProjects);

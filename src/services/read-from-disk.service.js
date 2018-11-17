@@ -60,7 +60,6 @@ export const loadGuppyProjects = (projectPaths: Array<string>) =>
   new Promise<{ [projectId: string]: ProjectInternal }>((resolve, reject) => {
     // Each project in a Guppy directory should have a package.json.
     // We'll read all the project info we need from this file.
-    // TODO: Maybe use asyncReduce to handle the output format in 1 neat step?
     asyncMap(
       projectPaths,
       function(projectPath, callback) {
@@ -71,7 +70,7 @@ export const loadGuppyProjects = (projectPaths: Array<string>) =>
             // project was deleted, and our cache is out-of-date.
             // This isn't truly an error, it just means we need to ignore this
             // project.
-            // TODO: Handle other errors!
+
             // If the error code is ENOENT means that the file hasn't been found
             // So we assume that the project has been deleted and return the
             // error as data instead of as an error, so we can deal with it
@@ -79,17 +78,17 @@ export const loadGuppyProjects = (projectPaths: Array<string>) =>
             if (err.code === 'ENOENT') {
               callback(null, err);
             } else {
+              // Id the error is a different one to directory deleted we pass it
+              // to the callback
               callback(err, null);
             }
           });
       },
       (err, results) => {
-        // It's possible that the project was deleted since Guppy last checked.
-        // Ignore any `null` results.
-        // If the project was deleted, an exception is caught, and so `err`
-        // might not be a true error.
-        // TODO: Handle true errors tho!
-        if (!results) {
+        // We are not treating directory not found as an error since we want to deal
+        // it with in the saga, notifying the user that something went wrong, so
+        // this will throw for any other error
+        if (err) {
           return reject(err);
         }
 
@@ -98,16 +97,16 @@ export const loadGuppyProjects = (projectPaths: Array<string>) =>
     );
   });
 
-export const parseProjects = projects => {
-  const validProjects = projects.filter(project => !!project && project.guppy);
-  const projectPathsRegex = /([\w-]+)(?:\/package.json)$/;
-  const deletedProjects = projects
-    .filter(project => !project.guppy)
-    .map(project => projectPathsRegex.exec(project.path)[1]);
+export const parseProjects = (projects: Array<Object>) => {
+  const validProjects = getValidProjects(projects);
+  const deletedProjects = getDeletedProjectsNames(projects);
+  return { deletedProjects, validProjects };
+};
 
-  // The results will be an array of package.jsons.
-  // I want a database-style map.
-  const parsedProjects = validProjects.reduce(
+// This will parse the array of mixed errors and package.jsons
+// and return a database-style maps with only the valid ones
+const getValidProjects = projects =>
+  projects.filter(project => !!project && project.guppy).reduce(
     (projectsMap, project) => ({
       ...projectsMap,
       [project.guppy.id]: project,
@@ -115,8 +114,18 @@ export const parseProjects = projects => {
     {}
   );
 
-  console.log('deletedProjects', deletedProjects);
-  return { deletedProjects, parsedProjects };
+// This will also parse the array of mixed errors and package.jsons
+// and return the names of the projects that have been deleted
+// right now this returns the name of the root directory on disk,
+// not the name of the project
+const getDeletedProjectsNames = (projects: Array<Object>): Array<*> => {
+  const projectPathsRegex = /[\w-]+(?=\/package\.json)/;
+
+  const projectNames = projects
+    .filter(project => !project.guppy)
+    .map(project => projectPathsRegex.exec(project.path));
+
+  return projectNames;
 };
 
 /**
